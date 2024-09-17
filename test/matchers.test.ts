@@ -8,6 +8,7 @@ import {
   matchesContextRelevance,
   matchesContextRecall,
   matchesContextFaithfulness,
+  renderLlmRubricPrompt,
 } from '../src/matchers';
 import { ANSWER_RELEVANCY_GENERATE, CONTEXT_RECALL, CONTEXT_RELEVANCE } from '../src/prompts';
 import { HuggingfaceTextClassificationProvider } from '../src/providers/huggingface';
@@ -21,10 +22,18 @@ import type {
   ProviderTypeMap,
 } from '../src/types';
 import { TestGrader } from './utils';
+import * as fs from 'fs';
+import * as path from 'path';
 
 jest.mock('../src/esm');
 jest.mock('../src/logger');
 jest.mock('../src/cliState');
+
+// Mock fs.readFileSync
+jest.mock('fs', () => ({
+  ...jest.requireActual('fs'),
+  readFileSync: jest.fn(),
+}));
 
 const Grader = new TestGrader();
 
@@ -781,6 +790,66 @@ describe('matchesAnswerRelevance', () => {
     mockCallApi.mockRestore();
     mockCallEmbeddingApi.mockRestore();
   });
+});
+
+describe('renderLlmRubricPrompt', () => {
+  it('should render the rubric prompt correctly', () => {
+    const rubric = 'Test rubric';
+    const llmOutput = 'Test output';
+    const grading = {
+      rubricPrompt: 'Evaluate the following output: {{output}} based on this rubric: {{rubric}}',
+    };
+    const vars = { customVar: 'Custom value' };
+
+    const result = renderLlmRubricPrompt(rubric, llmOutput, grading, vars);
+
+    expect(result).toBe('Evaluate the following output: Test output based on this rubric: Test rubric');
+  });
+
+  it('should use default grading prompt when not provided', () => {
+    const rubric = 'Test rubric';
+    const llmOutput = 'Test output';
+
+    const result = renderLlmRubricPrompt(rubric, llmOutput);
+
+    expect(result).toContain('Test rubric');
+    expect(result).toContain('Test output');
+  });
+
+  it('should include custom variables in the rendered prompt', () => {
+    const rubric = 'Test rubric';
+    const llmOutput = 'Test output';
+    const grading = {
+      rubricPrompt: 'Custom var: {{customVar}}, Output: {{output}}, Rubric: {{rubric}}',
+    };
+    const vars = { customVar: 'Custom value' };
+
+    const result = renderLlmRubricPrompt(rubric, llmOutput, grading, vars);
+
+    expect(result).toBe('Custom var: Custom value, Output: Test output, Rubric: Test rubric');
+  });
+
+  it('should load rubric prompt from file when starting with file://', () => {
+    const rubric = 'Test rubric';
+    const llmOutput = 'Test output';
+    const filePath = 'file://path/to/rubric_prompt.txt';
+    const fileContent = 'File content: {{output}} - {{rubric}}';
+    const grading = {
+      rubricPrompt: filePath,
+    };
+
+    // Mock the fs.readFileSync to return the file content
+    jest.spyOn(fs, 'readFileSync').mockReturnValue(fileContent);
+
+    const result = renderLlmRubricPrompt(rubric, llmOutput, grading);
+
+    expect(fs.readFileSync).toHaveBeenCalledWith(path.resolve('path/to/rubric_prompt.txt'), 'utf8');
+    expect(result).toBe('File content: Test output - Test rubric');
+  });
+
+  // afterEach(() => {
+  //   jest.restoreAllMocks();
+  // });
 });
 
 describe('matchesClassification', () => {
