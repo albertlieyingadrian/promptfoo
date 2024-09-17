@@ -1,4 +1,4 @@
-import { getAndCheckProvider, getGradingProvider, matchesClassification } from '../src/matchers';
+import { getAndCheckProvider, getGradingProvider, matchesClassification, renderLlmRubricPrompt } from '../src/matchers';
 import {
   matchesSimilarity,
   matchesLlmRubric,
@@ -21,10 +21,12 @@ import type {
   ProviderTypeMap,
 } from '../src/types';
 import { TestGrader } from './utils';
+import * as util from '../src/util';
 
 jest.mock('../src/esm');
 jest.mock('../src/logger');
 jest.mock('../src/cliState');
+jest.mock('../src/util');
 
 const Grader = new TestGrader();
 
@@ -780,6 +782,64 @@ describe('matchesAnswerRelevance', () => {
 
     mockCallApi.mockRestore();
     mockCallEmbeddingApi.mockRestore();
+  });
+});
+
+describe('renderLlmRubricPrompt', () => {
+  let mockMaybeLoadFromExternalFile: jest.SpyInstance;
+
+  beforeEach(() => {
+    // Mock maybeLoadFromExternalFile for all tests in this describe block
+    mockMaybeLoadFromExternalFile = jest.spyOn(util, 'maybeLoadFromExternalFile');
+    mockMaybeLoadFromExternalFile.mockImplementation((input) => {
+      // If input is a string, return it; otherwise, return a default string
+      return typeof input === 'string' ? input : 'Default rubric prompt';
+    });
+  });
+
+  afterEach(() => {
+    // Restore the original implementation after each test
+    mockMaybeLoadFromExternalFile.mockRestore();
+  });
+
+  it('should include custom variables in the rendered prompt', () => {
+    const rubric = 'Test rubric';
+    const llmOutput = 'Test output';
+    const grading = {
+      rubricPrompt: 'Custom var: {{customVar}}, Output: {{output}}, Rubric: {{rubric}}',
+    };
+    const vars = { customVar: 'Custom value' };
+
+    const result = renderLlmRubricPrompt(rubric, llmOutput, grading, vars);
+
+    expect(result).toBe('Custom var: Custom value, Output: Test output, Rubric: Test rubric');
+  });
+
+  it('should use default grading prompt when not provided', () => {
+    const rubric = 'Test rubric';
+    const llmOutput = 'Test output';
+
+    const result = renderLlmRubricPrompt(rubric, llmOutput);
+
+    expect(result).toContain('Test rubric');
+    expect(result).toContain('Test output');
+  });
+
+  it('should load rubric prompt from file when starting with file://', () => {
+    const rubric = 'Test rubric';
+    const llmOutput = 'Test output';
+    const filePath = 'file://path/to/rubric_prompt.txt';
+    const fileContent = 'File content: {{output}} - {{rubric}}';
+    const grading = {
+      rubricPrompt: filePath,
+    };
+
+    mockMaybeLoadFromExternalFile.mockReturnValue(fileContent);
+
+    const result = renderLlmRubricPrompt(rubric, llmOutput, grading);
+
+    expect(mockMaybeLoadFromExternalFile).toHaveBeenCalledWith(filePath);
+    expect(result).toBe('File content: Test output - Test rubric');
   });
 });
 
